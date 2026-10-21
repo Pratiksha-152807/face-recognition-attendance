@@ -1,0 +1,17 @@
+
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+
+dataset/
+dataset_backup/
+models_backup/
+models/face_model.yml
+
+students.csv
+students_backup.csv
+attendance.csv
+attendance_backup.csv
+dashboard_backup.py
