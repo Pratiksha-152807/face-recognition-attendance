@@ -15,3 +15,8 @@ students_backup.csv
 attendance.csv
 attendance_backup.csv
 dashboard_backup.py
+
+# Allow fictional records for the online demo
+!demo_data/students.csv
+!demo_data/attendance.csv
+dashboard_before_render.py

@@ -31,8 +31,14 @@ if not app.secret_key:
     )
 BASE_DIR = Path(__file__).resolve().parent
 
-STUDENTS_FILE = BASE_DIR / "students.csv"
-ATTENDANCE_FILE = BASE_DIR / "attendance.csv"
+DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() == "true"
+
+if DEMO_MODE:
+    STUDENTS_FILE = BASE_DIR / "demo_data" / "students.csv"
+    ATTENDANCE_FILE = BASE_DIR / "demo_data" / "attendance.csv"
+else:
+    STUDENTS_FILE = BASE_DIR / "students.csv"
+    ATTENDANCE_FILE = BASE_DIR / "attendance.csv"
 
 
 TRAIN_SCRIPT = BASE_DIR / "train_model.py"
@@ -489,24 +495,33 @@ def dashboard():
         </div>
 
         <div class="panel">
-            <h2>Quick Actions</h2>
-            <a class="button" href="{{ url_for('students_page') }}">Manage Students</a>
-            <a class="button secondary" href="{{ url_for('reports') }}">View Reports</a>
-            <a class="button secondary" href="{{ url_for('analytics') }}">View Analytics</a>
-            <a class="button success" href="{{ url_for('export_csv') }}">Export CSV</a>
-            <hr>
-            <form method="post" action="{{ url_for('run_script', script_name='train') }}">
-                <button type="submit">Train Face Model</button>
-            </form>
-            <form method="post" action="{{ url_for('run_script', script_name='attendance') }}">
-                <button type="submit" class="success">Start Face Recognition</button>
-            </form>
-            <p class="muted">
-                Face recognition opens a camera window when supported.
-                Close that window using the key expected by your attendance.py.
-            </p>
-        </div>
+    <h2>Quick Actions</h2>
+    <a class="button" href="{{ url_for('students_page') }}">Manage Students</a>
+    <a class="button secondary" href="{{ url_for('reports') }}">View Reports</a>
+    <a class="button secondary" href="{{ url_for('analytics') }}">View Analytics</a>
+    <a class="button success" href="{{ url_for('export_csv') }}">Export CSV</a>
+    <hr>
 
+    {% if not demo_mode %}
+    <form method="post" action="{{ url_for('run_script', script_name='train') }}">
+        <button type="submit">Train Face Model</button>
+    </form>
+
+    <form method="post" action="{{ url_for('run_script', script_name='attendance') }}">
+        <button type="submit" class="success">Start Face Recognition</button>
+    </form>
+
+    <p class="muted">
+        Face recognition opens a camera window when supported.
+        Close that window using the key expected by your attendance.py.
+    </p>
+    {% else %}
+    <p class="muted">
+        This is an online demonstration using fictional student records.
+        Face recognition is available in the local application only.
+    </p>
+    {% endif %}
+</div>
         <div class="grid">
             <div class="panel">
                 <h2>Daily Attendance</h2>
@@ -548,7 +563,7 @@ def dashboard():
         });
         </script>
     """, students=students, records=records, today=today,
-         present=len(present_today), recent=recent, labels=labels, values=values)
+         present=len(present_today), recent=recent, labels=labels, values=values, demo_mode=DEMO_MODE)
 
 
 # ==========================================================
@@ -624,10 +639,50 @@ def add_student():
         return redirect(url_for("students_page"))
 
     existing = get_students()
+
     if any(student["id"] == sid for student in existing):
         flash("That student ID already exists.")
         return redirect(url_for("students_page"))
 
+    # Online demo: save student details without using a webcam.
+    if DEMO_MODE:
+        headers, rows = read_csv_file(STUDENTS_FILE)
+
+        if not headers:
+            headers = ["student_id", "name"]
+
+        if email and "email" not in headers:
+            headers.append("email")
+
+        new_row = {
+            "student_id": sid,
+            "name": name,
+        }
+
+        if "email" in headers:
+            new_row["email"] = email
+
+        try:
+            with STUDENTS_FILE.open(
+                "w", newline="", encoding="utf-8"
+            ) as file:
+                writer = csv.DictWriter(
+                    file,
+                    fieldnames=headers,
+                    extrasaction="ignore",
+                )
+                writer.writeheader()
+                writer.writerows(rows)
+                writer.writerow(new_row)
+
+            flash("Demo student details saved successfully.")
+
+        except OSError as exc:
+            flash(f"Could not save student: {exc}")
+
+        return redirect(url_for("students_page"))
+
+    # Local application: retain webcam registration.
     if not REGISTER_SCRIPT.is_file():
         flash("Face registration script was not found.")
         return redirect(url_for("students_page"))
@@ -639,30 +694,11 @@ def add_student():
         )
         flash(
             f"Webcam registration started for {name} ({sid}). "
-            "Complete the 50-image capture before training the model."
+            "Complete the face capture."
         )
+
     except OSError as exc:
         flash(f"Could not start face registration: {exc}")
-
-    return redirect(url_for("students_page"))
-
-
-    row[id_header] = sid
-    row[name_header] = name
-    if email_header:
-        row[email_header] = email
-
-    try:
-        file_exists = STUDENTS_FILE.exists() and STUDENTS_FILE.stat().st_size > 0
-        with STUDENTS_FILE.open("a", newline="", encoding="utf-8") as file:
-            writer = csv.DictWriter(file, fieldnames=headers)
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(row)
-
-        flash("Student details saved. Register face images separately.")
-    except OSError as exc:
-        flash(f"Could not save student: {exc}")
 
     return redirect(url_for("students_page"))
 
@@ -963,6 +999,9 @@ def export_csv():
 @app.route("/run/<script_name>", methods=["POST"])
 @login_required
 def run_script(script_name):
+    if DEMO_MODE:
+        flash("Face recognition is available only in the local application.")
+        return redirect(url_for("dashboard"))
     scripts = {
         "train": TRAIN_SCRIPT,
         "attendance": ATTENDANCE_SCRIPT,
